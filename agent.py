@@ -36,8 +36,6 @@ class Agent:
 
         self.hyperparameter_set = hyperparameter_set
 
-        self.k_factor = 1.0  # Initial weight factor for noise term
-
         # hyperparameters
         self.env_id = hyperparameters['env_id']
         # number of steps agent will take to replay memory
@@ -75,34 +73,33 @@ class Agent:
         self.MODEL_FILE = os.path.join(RUNS_DIR, f'{self.hyperparameter_set}.pt')
         self.GRAPH_FILE = os.path.join(RUNS_DIR, f'{self.hyperparameter_set}.png')
 
-    def run(self, is_training=True, render=False):
-        if is_training:
-            start_time = datetime.now()
-            last_graph_update_time = start_time
-            log_message = f"{start_time.strftime(DATE_FORMAT)}: training starting..."
-            print(log_message)
-            with open(self.LOG_FILE, 'w') as file:
-                file.write(log_message + '\n')
+    def train(self):
+        start_time = datetime.now()
+        last_graph_update_time = start_time
 
-        env = gym.make(self.env_id, render_mode="human" if render else None, **self.env_make_params)
+        log_message = f"{start_time.strftime(DATE_FORMAT)}: Training starting..."
+        print(log_message)
+        with open(self.LOG_FILE, 'w') as file:
+            file.write(log_message + '\n')
+
+        # Create an instance of the environment
+        env = gym.make(self.env_id, **self.env_make_params)
+
         num_states = env.observation_space.shape[0]
         num_actions = env.action_space.n
-        rewards_per_episode = []
 
         policy_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+        target_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+        target_dqn.load_state_dict(policy_dqn.state_dict())
 
-        if is_training:
-            epsilon = self.epsilon_init
-            memory = ReplayMemory(self.replay_memory_size)
-            target_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
-            target_dqn.load_state_dict(policy_dqn.state_dict())
-            self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
-            epsilon_history = []
-            step_count = 0
-            best_reward = -9999999
-        else:
-            policy_dqn.load_state_dict(torch.load(self.MODEL_FILE))
-            policy_dqn.eval()
+        self.optimizer = torch.optim.Adam(policy_dqn.parameters(), lr=self.learning_rate_a)
+        memory = ReplayMemory(self.replay_memory_size)
+
+        epsilon = self.epsilon_init
+        step_count = 0
+        best_reward = -9999999
+        rewards_per_episode = []
+        epsilon_history = []
 
         for episode in itertools.count():
             state, _ = env.reset()
@@ -111,42 +108,72 @@ class Agent:
             episode_reward = 0.0
 
             while not terminated and episode_reward < self.stop_on_reward:
-                if is_training and random.random() < epsilon:
+                if random.random() < epsilon:
                     action = env.action_space.sample()
                     action = torch.tensor(action, dtype=torch.int64, device=device)
                 else:
                     with torch.no_grad():
                         action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
 
-                new_state, reward, terminated, _, info = env.step(action.item())
+                new_state, reward, terminated, _, _ = env.step(action.item())
                 episode_reward += reward
                 new_state = torch.tensor(new_state, dtype=torch.float, device=device)
                 reward = torch.tensor(reward, dtype=torch.float, device=device)
 
-                if is_training:
-                    memory.append((state, action, new_state, reward, terminated))
-                    step_count += 1
-
+                memory.append((state, action, new_state, reward, terminated))
+                step_count += 1
                 state = new_state
 
             rewards_per_episode.append(episode_reward)
 
-            if is_training:
-                self.update_k_factor(episode_reward)
+            if episode_reward > best_reward:
+                log_message = f"{datetime.now().strftime(DATE_FORMAT)}: New best reward {episode_reward:0.1f} at episode {episode}, saving model..."
+                print(log_message)
+                with open(self.LOG_FILE, 'a') as file:
+                    file.write(log_message + '\n')
+                torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
+                best_reward = episode_reward
 
-                if episode_reward > best_reward:
-                    log_message = f"{datetime.now().strftime(DATE_FORMAT)}: New best reward {episode_reward:0.1f} at episode {episode}, saving model..."
-                    print(log_message)
-                    with open(self.LOG_FILE, 'a') as file:
-                        file.write(log_message + '\n')
-                    torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
-                    best_reward = episode_reward
+            current_time = datetime.now()
+            if current_time - last_graph_update_time > timedelta(seconds=10):
+                self.save_graph(rewards_per_episode, epsilon_history)
+                last_graph_update_time = current_time
 
-                current_time = datetime.now()
-                if current_time - last_graph_update_time > timedelta(seconds=10):
-                    self.save_graph(rewards_per_episode, epsilon_history)
-                    last_graph_update_time = current_time
-    
+            if len(memory) > self.mini_batch_size:
+                mini_batch = memory.sample(self.mini_batch_size)
+                self.optimize(mini_batch, policy_dqn, target_dqn)
+                epsilon = max(epsilon * self.epsilon_decay, self.epsilon_min)
+                epsilon_history.append(epsilon)
+
+            if step_count > self.network_sync_rate:
+                target_dqn.load_state_dict(policy_dqn.state_dict())
+                step_count = 0
+
+
+    def test(self, render=False):
+        env = gym.make(self.env_id, render_mode="human" if render else None, **self.env_make_params)
+        num_states = env.observation_space.shape[0]
+        num_actions = env.action_space.n
+
+        policy_dqn = DQN(num_states, num_actions, self.fc1_nodes).to(device)
+        policy_dqn.load_state_dict(torch.load(self.MODEL_FILE))
+        policy_dqn.eval()
+
+        state, _ = env.reset()
+        state = torch.tensor(state, dtype=torch.float, device=device)
+        terminated = False
+        total_reward = 0
+
+        while not terminated:
+            with torch.no_grad():
+                action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
+            new_state, reward, terminated, _, _ = env.step(action.item())
+            total_reward += reward
+            state = torch.tensor(new_state, dtype=torch.float, device=device)
+
+        print(f"Test Episode Total Reward: {total_reward}")
+        env.close()
+
     
     def save_graph(self, rewards_per_episode, epsilon_history):
         # save plots
@@ -174,8 +201,21 @@ class Agent:
         plt.close(fig)
     
     def optimize(self, mini_batch, policy_dqn, target_dqn):
+         
+        # for state, action, new_state, reward, terminted in mini_batch:
+
+        #     if terminted:
+        #         target = reward
+        #     else:
+        #         with torch.no_grad():
+        #             target_q = reward + self.discount_factor_g * target_dqn(new_state).max()
+            
+        # transpose the list of experiences and separate each element
+
         states, actions, new_states, rewards, terminations = zip(*mini_batch)
 
+        # stack tensors to create batch tensors
+        # tensor([[1,2,3]])
         states = torch.stack(states)
         actions = torch.stack(actions)
         new_states = torch.stack(new_states)
@@ -183,43 +223,32 @@ class Agent:
         terminations = torch.tensor(terminations).float().to(device)
 
         with torch.no_grad():
-            target_q = rewards + (1 - terminations) * self.discount_factor_g * target_dqn(new_states).max(dim=1)[0]
+            # calculate target q values (expected returns)
+            target_q = rewards + (1-terminations) * self.discount_factor_g * target_dqn(new_states).max(dim=1)[0]
 
-        current_q = policy_dqn(states).gather(dim=1, index=actions.unsqueeze(dim=1)).squeeze()
+        # calculate q values from current policy
+        current_q = policy_dqn(states).gather(dim=1, index = actions.unsqueeze(dim=1)).squeeze()
 
-        noise_level = self.calculate_noise_level(policy_dqn)
-        loss = self.loss_fn(current_q, target_q) + self.k_factor * noise_level
+        # compute loss for the whole minibatch
+        loss = self.loss_fn(current_q, target_q)
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-
-        # Reset noise after each optimization step for training stability
-        policy_dqn.reset_noise()
-        target_dqn.reset_noise()
-
-    def calculate_noise_level(self, model):
-        noise_term = 0
-        for name, param in model.named_parameters():
-            if 'sigma' in name:
-                noise_term += param.abs().sum()
-        return noise_term
-
-    def update_k_factor(self, episode_reward, threshold=10):
-        # Adjust the value of k based on episode performance
-        if episode_reward > threshold:
-            self.k_factor = max(self.k_factor * 0.99, 0.1)  # Gradually reduce k to a minimum value
-            print(f"Updated k_factor: {self.k_factor:.4f}")
+        #optimise the model
+        self.optimizer.zero_grad()  # clear gradients
+        loss.backward()             # compute gradients (backpropagation)
+        self.optimizer.step()       # update network parameters i.e. weights & biases
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train or test model.')
     parser.add_argument('hyperparameters', help='')
     parser.add_argument('--train', help='Training mode', action='store_true')
+    parser.add_argument('--test', help='Testing mode', action='store_true')
     args = parser.parse_args()
 
     dql = Agent(hyperparameter_set=args.hyperparameters)
 
     if args.train:
-        dql.run(is_training=True)
+        dql.train()
+    elif args.test:
+        dql.test(render=True)
     else:
-        dql.run(is_training=False, render=True)
+        print("Please specify either --train or --test.")
