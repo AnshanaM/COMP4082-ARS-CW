@@ -1,0 +1,34 @@
+cartpole1:
+  env_id: CartPole-v1
+  learning_rate_a: 0.0001               # learning rate for the Adam optimizer
+  replay_memory_size: 10000             # replay memory capacity
+  mini_batch_size: 32                   # batch size for experience replay
+  discount_factor_g: 0.99               # discount factor (gamma) for future rewards
+  network_sync_rate: 1000               # frequency (in steps) to update the target network
+  initial_sigma: 0.4                    # initial standard deviation for noise
+  final_k_factor: 4.0                   # final noise weighting factor
+  noise_penalty_scale: 0.5              # scaling factor for the noise penalty - 
+  adam_epsilon: 0                       # epsilon value for the Adam optimizer
+  adam_beta1: 0.9                       # beta1 parameter for the Adam optimizer
+  adam_beta2: 0.999                     # beta2 parameter for the Adam optimizer
+  epsilon_init: 1.0
+  epsilon_decay: 0.995
+  epsilon_min: 0.05
+  env_make_params:                      # Optional environment-specific parameters
+    render_mode: "human"                 # Example environment-specific parameter
+
+
+# mountaincar-nrowandqn:
+#   env_id: MountainCar-NROWANDQN
+#   learning_rate_a: 0.001                # learning rate for the Adam optimizer
+#   replay_memory_size: 10000             # replay memory capacity
+#   mini_batch_size: 32                   # batch size for experience replay
+#   discount_factor_g: 0.99               # discount factor (gamma) for future rewards
+#   network_sync_rate: 1000               # frequency (in steps) to update the target network
+#   initial_sigma: 0.4                    # initial standard deviation for noise
+#   final_k_factor: 4.0                   # final noise weighting factor
+#   adam_epsilon: 0                       # epsilon value for the Adam optimizer
+#   adam_beta1: 0.9                       # beta1 parameter for the Adam optimizer
+#   adam_beta2: 0.999                     # beta2 parameter for the Adam optimizer
+
+
