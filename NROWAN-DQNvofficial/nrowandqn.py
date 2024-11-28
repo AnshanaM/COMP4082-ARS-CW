@@ -55,7 +55,7 @@ class NROWANDQN(nn.Module):
 
 
 if __name__ == '__main__':
-    state_dim = 12
+    state_dim = 4
     action_dim = 2
     net = NROWANDQN(state_dim, action_dim)
     state = torch.randn(1, state_dim)
