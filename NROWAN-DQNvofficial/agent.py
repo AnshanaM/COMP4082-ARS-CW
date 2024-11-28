@@ -51,7 +51,7 @@ class Agent:
         self.epsilon_init = hyperparameters['epsilon_init']
         self.epsilon_decay = hyperparameters['epsilon_decay']
         self.epsilon_min = hyperparameters['epsilon_min']
-
+        self.k_factor = 1.0
 
 
         self.loss_fn = nn.MSELoss()
@@ -136,7 +136,7 @@ class Agent:
         noise_penalty = ((sigma_weights ** 2).sum() + (sigma_bias ** 2).sum()) / ((p_star + 1) * N_a)
 
         # Combine losses
-        total_loss = td_loss + self.noise_penalty_scale * self.k * noise_penalty
+        total_loss = td_loss + self.noise_penalty_scale * self.k_factor * noise_penalty
 
         # Log TD error and noise penalty
         log_message = f"TD Error Mean: {td_error.mean().item():.4f}, Noise Penalty: {noise_penalty:.4f}"
@@ -179,7 +179,8 @@ class Agent:
                 state, _ = env.reset()
                 state = torch.tensor(state, dtype=torch.float, device=device)
                 terminated = False
-                episode_reward = 0.0
+                episode_transitions = []  # Collect all transitions for normalization
+                episode_rewards = []  # Collect rewards for normalization
 
                 while not terminated:
                     if random.random() < epsilon:
@@ -190,16 +191,29 @@ class Agent:
                             action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
 
                     new_state, reward, terminated, _, _ = env.step(action.item())
-                    episode_reward += reward
                     new_state = torch.tensor(new_state, dtype=torch.float, device=device)
                     reward = torch.tensor(reward, dtype=torch.float, device=device)
 
-                    self.memory.append((state, action, new_state, reward, terminated))
-                    step_count += 1
+                    # Collect rewards and transitions
+                    episode_rewards.append(reward)
+                    episode_transitions.append((state, action, new_state, reward, terminated))
+
                     state = new_state
 
+                # Normalize rewards after the episode
+                rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float)
+                rewards_mean = rewards_tensor.mean()
+                rewards_std = rewards_tensor.std() + 1e-6  # Avoid division by zero
+                normalized_rewards = (rewards_tensor - rewards_mean) / rewards_std
+
+                # Update transitions with normalized rewards
+                for idx, (state, action, new_state, _, terminated) in enumerate(episode_transitions):
+                    normalized_reward = normalized_rewards[idx]
+                    self.memory.append((state, action, new_state, normalized_reward, terminated))
+
+                # Store the cumulative reward for the episode
+                episode_reward = sum(episode_rewards)
                 rewards_per_episode.append(episode_reward)
-                cumulative_reward += episode_reward  # Update cumulative reward
 
                 # Update epsilon using decay
                 epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
@@ -211,23 +225,29 @@ class Agent:
 
                 # Update k using the formula in the paper
                 if max_reward - min_reward > 0:
-                    k_new = self.final_k_factor * (cumulative_reward - min_reward) / (max_reward - min_reward)
+                    k_new = self.final_k_factor * (episode_reward - min_reward) / (max_reward - min_reward)
                 else:
                     k_new = self.final_k_factor
 
-                # Smooth k to avoid drastic jumps (if needed)
-                self.k = max(k_new, 0.1)  # Ensure k does not go below a minimum value
+                # Smooth k to avoid drastic jumps
+                self.k_factor = 0.9 * self.k_factor + 0.1 * k_new
 
                 # Sync target network periodically
                 if step_count > self.network_sync_rate:
                     target_dqn.load_state_dict(policy_dqn.state_dict())
                     step_count = 0
 
-                log_message = f"Episode {episode}: Reward: {episode_reward:.2f}, Epsilon: {epsilon:.4f}, k: {self.k:.4f}, Noise Penalty Scale: {self.noise_penalty_scale:.4f}"
+                # Log episode details
+                log_message = (
+                    f"Episode {episode}: Reward: {episode_reward:.2f}, Epsilon: {epsilon:.4f}, "
+                    f"k: {self.k_factor:.4f}, Min Reward: {min_reward:.2f}, Max Reward: {max_reward:.2f}, "
+                    f"Noise Penalty Scale: {self.noise_penalty_scale:.4f}"
+                )
                 with open(self.LOG_FILE, 'a') as file:
                     file.write(log_message + '\n')
 
                 print(log_message)
+
 
             rewards_per_episode_all_runs.append(rewards_per_episode)
 
