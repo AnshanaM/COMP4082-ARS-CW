@@ -14,7 +14,7 @@ cartpole1:
   epsilon_init: 1.0
   epsilon_decay: 0.995
   epsilon_min: 0.05
-  max_time_steps_per_episode: 500       # T from algorithm 1
+  max_time_steps_per_episode: 500       # T from algorithm 1, max timesteps for cartpole
   env_make_params:                      # Optional environment-specific parameters
     render_mode: "human"                 # Example environment-specific parameter
 

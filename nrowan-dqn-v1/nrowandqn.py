@@ -1,48 +1,68 @@
+import gymnasium as gym
 import torch
-from torch import nn
+import torch.nn as nn
 import torch.nn.functional as F
+from torch.autograd import Variable
+from NoisyLinear import NoisyLinear
+   
+"""
+This NROWAN-DQN will be applied to Cartpole and MountainCar
+No need of convolution layers, state information is directly 
+delivered to fully connected layer.
+Fully connected layer has 2 hidden layers and 1 output layer.
+Each hidden layer has 128 neurons,
+Output layer has same number of neurons as number of environment actions.
+All layers user ReLu function as activation function except output layer.
+
+"""
 
 class NROWANDQN(nn.Module):
-    def __init__(self, state_dim, action_dim, initial_sigma):
+    def __init__(self, num_inputs, num_actions, env):
         super(NROWANDQN, self).__init__()
 
-        # Initialize parameters for Gaussian noise
-        self.sigma = initial_sigma  # Initial standard deviation for noise
-        self.noise_scale = 1.0     # Scaling factor for the noise
+        self.env = env
 
-        # Fully connected layers
-        self.fc1 = nn.Linear(state_dim, 128)  # First hidden layer
-        self.fc2 = nn.Linear(128, 128)        # Second hidden layer
-        self.fc3 = nn.Linear(128, action_dim) # Output layer
+        #fully connected layer with 2 hidden layers
+        self.fc1 = nn.Linear(num_inputs, 128)
+        self.fc2 = nn.Linear(128, 128)
+        # noisy layer
+        self.noisy_fc3 = NoisyLinear(128, env.action_space.n)
 
-    def forward(self, x):
-        # Pass through fully connected layers with ReLU activation
-        x = F.relu(self.fc1(x))
+    # forward pass
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
-        return self.fc3(x)  # Output layer without activation
+        x = self.noisy_fc3(x)
+        return x
+    
+    # get action
+    # def act(self, state):
+    #     with torch.no_grad():
+    #         state = torch.FloatTensor(state).unsqueeze(0)
+    #     q_value = self.forward(state)
+    #     action  = q_value.max(1)[1].data[0]
+    #     return action
 
-    def apply_gaussian_noise(self):
-        # Apply Gaussian noise to the network parameters
+    def act(self, state):
+        if not isinstance(state, torch.Tensor):
+            state = torch.FloatTensor(state).unsqueeze(0).to("cpu")  # Ensure state is a tensor and on the correct device
         with torch.no_grad():
-            for param in self.parameters():
-                noise = torch.randn_like(param) * self.sigma * self.noise_scale
-                param.add_(noise)
+            q_value = self.forward(state)  # Get Q-values for all actions
+        action = q_value.argmax(dim=1).item()  # Select the action with the max Q-value and convert to Python scalar
+        return action
+    
+    def reset_noise(self):
+        self.noisy_fc3.reset_noise()
 
-    def adjust_weights(self, k_factor):
-        # Online weight adjustment using a specified factor
-        with torch.no_grad():
-            for param in self.parameters():
-                param.mul_(k_factor)
+    def get_sigmaloss(self):
+        return self.noisy_fc3.sigma_loss()
 
 if __name__ == '__main__':
-    # Example state dimensions for CartPole
-    state_dim = 4  # CartPole state has 4 features
-    action_dim = 2 # CartPole has 2 actions (left, right)
-    initial_sigma = 0.4
-
-    net = NROWANDQN(state_dim, action_dim, initial_sigma)
-
-    # Example input tensor (batch size, state_dim)
+    state_dim = 4
+    action_dim = 2
+    env = gym.make("CartPole-v1")
+    net = NROWANDQN(state_dim, action_dim, env)
     state = torch.randn(1, state_dim)
     output = net(state)
     print(output)
+

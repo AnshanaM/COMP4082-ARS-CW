@@ -1,4 +1,4 @@
-import gymnasium as gym
+import gymnasium as gym 
 import numpy as np
 import matplotlib
 import matplotlib.pyplot as plt
@@ -42,7 +42,7 @@ class Agent:
         self.mini_batch_size = hyperparameters['mini_batch_size']
         self.discount_factor_g = hyperparameters['discount_factor_g']
         self.network_sync_rate = hyperparameters['network_sync_rate']
-        self.initial_sigma = hyperparameters['initial_sigma']
+        self.initial_delta = hyperparameters['initial_delta']
         self.final_k_factor = hyperparameters['final_k_factor']
         self.noise_penalty_scale = hyperparameters['noise_penalty_scale']
         self.adam_epsilon = hyperparameters['adam_epsilon']
@@ -51,8 +51,10 @@ class Agent:
         self.epsilon_init = hyperparameters['epsilon_init']
         self.epsilon_decay = hyperparameters['epsilon_decay']
         self.epsilon_min = hyperparameters['epsilon_min']
-        self.k_factor = 1.0
+        self.max_time_steps_per_episode = hyperparameters['max_time_steps_per_episode']
 
+
+        self.k_factor = 1.0
 
         self.loss_fn = nn.MSELoss()
 
@@ -62,12 +64,26 @@ class Agent:
         self.action_dim = self.env.action_space.n
 
         # Initialize the networks
-        self.network = NROWANDQN(self.state_dim, self.action_dim, self.initial_sigma).to(device)
-        self.target_network = NROWANDQN(self.state_dim, self.action_dim, self.initial_sigma).to(device)
+        self.network = NROWANDQN(self.state_dim, self.action_dim, self.initial_delta).to(device)
+        self.target_network = NROWANDQN(self.state_dim, self.action_dim, self.initial_delta).to(device)
         self.target_network.load_state_dict(self.network.state_dict())
+
 
         # Replay Memory
         self.memory = ReplayMemory(self.replay_memory_size)
+
+        # Pre-fill replay memory section 5.2 page 8, "For Cartpole, MountainCar and Acrobot,..."
+        state, _ = self.env.reset()
+        state = torch.tensor(state, dtype=torch.float, device=device)
+        print("Pre-filling replay memory...")
+        for _ in range(self.mini_batch_size):  # Pre-fill with 32 tuples
+            action = self.env.action_space.sample()
+            new_state, reward, terminated, _, _ = self.env.step(action)
+            new_state = torch.tensor(new_state, dtype=torch.float, device=device)
+            reward = torch.tensor(reward, dtype=torch.float, device=device)
+            self.memory.append((state, torch.tensor(action), new_state, reward, terminated))
+            state = new_state if not terminated else torch.tensor(self.env.reset()[0], dtype=torch.float, device=device)
+
 
         # Optimizer
         self.optimizer = torch.optim.Adam(self.network.parameters(), lr=self.learning_rate_a, betas=(self.adam_beta1, self.adam_beta2), eps=self.adam_epsilon)
@@ -99,90 +115,127 @@ class Agent:
             self.k_factor = max(self.k_factor * 0.99, 0.1)
             print(f"Updated k_factor: {self.k_factor:.4f}")
 
-    def compute_total_loss(self, current_q, rewards, next_states, terminations, target_dqn):
+    def compute_td_error(self, current_q, rewards, next_states, terminations, target_dqn):
         """
-        Compute the total loss, including the TD error and noise penalty.
+        Compute the Temporal Difference (TD) error.
 
         Args:
-            current_q (torch.Tensor): Current Q-values for selected actions.
-            rewards (torch.Tensor): Rewards received after taking the action.
-            next_states (torch.Tensor): The next states after the action.
-            terminations (torch.Tensor): Flags indicating if a state is terminal.
-            target_dqn (nn.Module): The target Q-network.
+            current_q (torch.Tensor): Q-values for the current states and actions.
+            rewards (torch.Tensor): Rewards for the actions taken.
+            next_states (torch.Tensor): Next states resulting from the actions.
+            terminations (torch.Tensor): Terminal flags for the states.
+            target_dqn (nn.Module): Target Q-network.
 
         Returns:
-            torch.Tensor: Total loss.
+            torch.Tensor: TD error.
         """
-        # Compute next state Q-values using the target network
+        # Compute the Q-value targets using the target network
         with torch.no_grad():
-            next_q_values = target_dqn(next_states)
-            max_next_q_values, _ = next_q_values.max(dim=1)
+            next_q_values = target_dqn(next_states)  # Q(s_{t+1}, a; θ^−)
+            max_next_q_values, _ = next_q_values.max(dim=1)  # max_a Q(s_{t+1}, a; θ^−)
 
-            # Target Q-value: r_t + gamma * max_a Q(s_{t+1}, a; theta')
+            # Convert terminations to float to allow arithmetic operations
+            terminations = terminations.float()
+
+            # Target Q-value: r_t + γ * max_a Q(s_{t+1}, a; θ^−) * (1 − terminal)
             target_q = rewards + self.discount_factor_g * max_next_q_values * (1 - terminations)
 
-        # TD Error: delta_t = target_q - current_q
+        # TD error: δ_t = target_q - current_q
         td_error = target_q - current_q
+        return td_error
 
-        # TD Loss: Mean squared TD error
-        td_loss = td_error.pow(2).mean()
 
-        # Compute noise penalty
-        p_star = self.network.noisy_fc3.in_features
-        N_a = self.network.noisy_fc3.out_features
-        sigma_weights = self.network.noisy_fc3.weight_sigma
-        sigma_bias = self.network.noisy_fc3.bias_sigma
-
+    def compute_noise_penalty(self):
+        """
+        Calculate the noise penalty D for the noisy layer in the Q-network.
+        
+        Returns:
+            noise_penalty (float): The computed noise penalty.
+        """
+        p_star = self.network.noisy_fc3.in_features  # Number of input features to the noisy layer
+        N_a = self.network.noisy_fc3.out_features    # Number of output actions (units in the noisy layer)
+        
+        # Get the noise-related parameters from the noisy layer
+        sigma_weights = self.network.noisy_fc3.weight_delta  # Variance of weights
+        sigma_bias = self.network.noisy_fc3.bias_delta      # Variance of biases
+        
+        # Calculate the noise penalty (D) according to the formula in the paper
         noise_penalty = ((sigma_weights ** 2).sum() + (sigma_bias ** 2).sum()) / ((p_star + 1) * N_a)
+        
+        return noise_penalty
 
-        # Combine losses
+    
+    def compute_total_loss(self, current_q, rewards, next_states, terminations, target_dqn):
+        # Compute the TD error (standard in Q-learning)
+        td_error = self.compute_td_error(current_q, rewards, next_states, terminations, target_dqn)
+        
+        # Compute the noise penalty D
+        noise_penalty = self.compute_noise_penalty()
+        
+        # Combine the TD error and the noise penalty into the total loss
+        td_loss = td_error.pow(2).mean()  # Standard TD error loss
         total_loss = td_loss + self.noise_penalty_scale * self.k_factor * noise_penalty
-
-        # Log TD error and noise penalty
-        log_message = f"TD Error Mean: {td_error.mean().item():.4f}, Noise Penalty: {noise_penalty:.4f}"
-        print(log_message)
-        with open(self.LOG_FILE, 'a') as file:
-            file.write(log_message + '\n')
-
+        
         return total_loss
+
+
+    def sample_minibatch(self):
+        """
+        Sample a random minibatch from the replay memory.
+        """
+        minibatch = self.memory.sample(self.mini_batch_size)
+        states, actions, next_states, rewards, terminations = zip(*minibatch)
+        
+        return torch.stack(states), torch.stack(actions), torch.stack(next_states), torch.stack(rewards), torch.tensor(terminations)
 
 
     
     def train(self):
         start_time = datetime.now()
         last_graph_update_time = start_time
-
+        
+        #print and prepare log file to write to
         log_message = f"{start_time.strftime(DATE_FORMAT)}: Training starting..."
         print(log_message)
         with open(self.LOG_FILE, 'w') as file:
             file.write(log_message + '\n')
 
-        epsilon = self.epsilon_init
-        step_count = 0
-        rewards_per_episode_all_runs = []  # List to store rewards from all 5 runs
-        epsilon_history = []
 
-        min_reward, max_reward = float('inf'), float('-inf')
-        cumulative_reward = 0  # Initialize the cumulative reward
+        # run training 5 times and collect the rewards
+        for run in range(1):
+            # initialise epsilon, step count, rewards array for 5 training sessions, and epsilon history
+            epsilon = self.epsilon_init
+            step_count = 0
+            rewards_per_episode_all_runs = []  # List to store rewards from all 5 runs
+            epsilon_history = []
 
-        # Run training 5 times and collect the rewards
-        for run in range(5):
-            rewards_per_episode = []  # Reset rewards for each run
+            # initialise min and max reward as positive and negative infinity
+            min_reward, max_reward = float('inf'), float('-inf')
+
+            # initialize the cumulative reward
+            cumulative_reward = 0 
+            # Reset rewards for each run
+            rewards_per_episode = []
             print(f"\nTraining Run {run + 1}...")
 
+            # set up environment, policy and target network
             env = self.env
             policy_dqn = self.network
             target_dqn = self.target_network
             target_dqn.load_state_dict(policy_dqn.state_dict())
 
+            # loop for 500 episodes
             for episode in range(500):
-                state, _ = env.reset()
-                state = torch.tensor(state, dtype=torch.float, device=device)
-                terminated = False
                 episode_transitions = []  # Collect all transitions for normalization
                 episode_rewards = []  # Collect rewards for normalization
 
-                while not terminated:
+                for t in range(self.max_time_steps_per_episode):
+
+                    state, _ = env.reset()
+                    state = torch.tensor(state, dtype=torch.float, device=device)
+                    terminated = False
+
+                    # select action
                     if random.random() < epsilon:
                         action = env.action_space.sample()
                         action = torch.tensor(action, dtype=torch.int64, device=device)
@@ -190,66 +243,110 @@ class Agent:
                         with torch.no_grad():
                             action = policy_dqn(state.unsqueeze(dim=0)).squeeze().argmax()
 
+                    #execute action
                     new_state, reward, terminated, _, _ = env.step(action.item())
                     new_state = torch.tensor(new_state, dtype=torch.float, device=device)
                     reward = torch.tensor(reward, dtype=torch.float, device=device)
 
-                    # Collect rewards and transitions
+                    # store experience
+                    self.memory.append((state, action, new_state, reward, terminated))
+
+
+                    # calculate noise penalty D for online Q-net according to Equation 8
+                    noise_penalty = self.compute_noise_penalty()
+
+                    # log the noise penalty
+                    log_message = f"Episode {episode+1}: Noise Penalty (D): {noise_penalty:.4f}"
+                    print(log_message)
+                    with open(self.LOG_FILE, 'a') as file:
+                        file.write(log_message + '\n')
+
+
+                    # this section will update normalised rewards and calculate k according to normalised reward, max and min reward
+                    # append transition, even if terminated
                     episode_rewards.append(reward)
                     episode_transitions.append((state, action, new_state, reward, terminated))
-
                     state = new_state
+                    # normalisation
+                    rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float)
+                    rewards_mean = rewards_tensor.mean()
+                    rewards_std = rewards_tensor.std() + 1e-6  # Avoid division by zero
+                    normalized_rewards = (rewards_tensor - rewards_mean) / rewards_std
+                    # Update transitions with normalized rewards
+                    for idx, (state, action, new_state, _, terminated) in enumerate(episode_transitions):
+                        normalized_reward = normalized_rewards[idx]
+                        self.memory.append((state, action, new_state, normalized_reward, terminated))
+                    # Store the cumulative reward for the episode
+                    episode_reward = sum(episode_rewards)
+                    rewards_per_episode.append(episode_reward)
+                    # Update epsilon using decay
+                    epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
+                    epsilon_history.append(epsilon)
+                    # Update min/max rewards
+                    min_reward = min(min_reward, episode_reward)
+                    max_reward = max(max_reward, episode_reward)
+                    # Update k using the equation 12
+                    if max_reward - min_reward > 0:
+                        k_new = self.final_k_factor * (episode_reward - min_reward) / (max_reward - min_reward)
+                    else:
+                        k_new = self.final_k_factor
+                    # optional: smooth k to avoid drastic jumps
+                    # self.k_factor = 0.9 * self.k_factor + 0.1 * k_new
 
-                # Normalize rewards after the episode
-                rewards_tensor = torch.tensor(episode_rewards, dtype=torch.float)
-                rewards_mean = rewards_tensor.mean()
-                rewards_std = rewards_tensor.std() + 1e-6  # Avoid division by zero
-                normalized_rewards = (rewards_tensor - rewards_mean) / rewards_std
 
-                # Update transitions with normalized rewards
-                for idx, (state, action, new_state, _, terminated) in enumerate(episode_transitions):
-                    normalized_reward = normalized_rewards[idx]
-                    self.memory.append((state, action, new_state, normalized_reward, terminated))
 
-                # Store the cumulative reward for the episode
-                episode_reward = sum(episode_rewards)
-                rewards_per_episode.append(episode_reward)
+                    #check if terminal state
+                    if terminated:
+                        # normalised reward (r+)= 0
+                        normalized_reward = 0
+                        state, _ = env.reset()
+                        state = torch.tensor(state, dtype=torch.float, device=device)
+                        terminated = False
+                        pass
 
-                # Update epsilon using decay
-                epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
-                epsilon_history.append(epsilon)
+                    # increment step count
+                    step_count += 1
 
-                # Update min/max rewards
-                min_reward = min(min_reward, episode_reward)
-                max_reward = max(max_reward, episode_reward)
+                    #if step count exceeds mini batch size
+                    if step_count > self.mini_batch_size:
+                        # sample new random mini batch of experience from replay buffer
+                        states, actions, next_states, rewards, terminations = self.sample_minibatch()
+                        current_q = self.network(states).gather(1, actions.unsqueeze(1)).squeeze()
+                        loss = self.compute_total_loss(current_q, rewards, next_states, terminations, self.target_network)
+                        # updating direction of parameters is calculated
+                        # update parameters according to updating direction and the learning rate
+                        #optimize the policy network
+                        self.optimizer.zero_grad()
+                        loss.backward()
+                        self.optimizer.step()
 
-                # Update k using the formula in the paper
-                if max_reward - min_reward > 0:
-                    k_new = self.final_k_factor * (episode_reward - min_reward) / (max_reward - min_reward)
-                else:
-                    k_new = self.final_k_factor
+                        #log the optimization step
+                        log_message = f"Optimization step, Loss: {loss.item():.4f}, Step Count: {step_count}"
+                        print(log_message)
+                        with open(self.LOG_FILE, 'a') as file:
+                            file.write(log_message + '\n')
 
-                # Smooth k to avoid drastic jumps
-                self.k_factor = 0.9 * self.k_factor + 0.1 * k_new
 
-                # Sync target network periodically
-                if step_count > self.network_sync_rate:
-                    target_dqn.load_state_dict(policy_dqn.state_dict())
-                    step_count = 0
+                    
+                    # sync target network with policy network parameters
+                    if step_count > self.network_sync_rate:
+                        target_dqn.load_state_dict(policy_dqn.state_dict())
+                        step_count = 0
+                        
 
+                    
                 # Log episode details
                 log_message = (
                     f"Episode {episode}: Reward: {episode_reward:.2f}, Epsilon: {epsilon:.4f}, "
                     f"k: {self.k_factor:.4f}, Min Reward: {min_reward:.2f}, Max Reward: {max_reward:.2f}, "
-                    f"Noise Penalty Scale: {self.noise_penalty_scale:.4f}"
+                    f"Noise Penalty Scale: {self.noise_penalty_scale:.4f}, Mean Reaward: {rewards_mean}, Std Reward: {rewards_std},"
                 )
                 with open(self.LOG_FILE, 'a') as file:
                     file.write(log_message + '\n')
 
                 print(log_message)
+                rewards_per_episode_all_runs.append(rewards_per_episode)
 
-
-            rewards_per_episode_all_runs.append(rewards_per_episode)
 
         # After 5 runs, average the rewards
         mean_rewards_across_runs = np.mean(rewards_per_episode_all_runs, axis=0)
@@ -257,6 +354,8 @@ class Agent:
         print(f"Training completed. Saving model to {self.MODEL_FILE}")
         torch.save(policy_dqn.state_dict(), self.MODEL_FILE)
 
+        # end algorithm
+                
 
 
     def save_graph(self, mean_rewards_across_runs, epsilon_history):
@@ -299,46 +398,32 @@ class Agent:
             print(f"Error saving graph: {e}")
 
 
-    def optimize_loss(self, mini_batch, policy_dqn, target_dqn):
+    def optimize(self, policy_dqn, target_dqn):
         """
-        Perform a single optimization step using the TD error.
-
-        Args:
-            mini_batch (list): A batch of experiences from the replay memory.
-            policy_dqn (nn.Module): Policy Q-network.
-            target_dqn (nn.Module): Target Q-network.
-
-        Returns:
-            None
+        Perform a single optimization step using the TD error and minibatch.
         """
-        # Unpack the mini-batch
-        states, actions, next_states, rewards, terminations = zip(*mini_batch)
+        states, actions, next_states, rewards, terminations = self.sample_minibatch()
 
-        states = torch.stack(states)
-        actions = torch.stack(actions)
-        next_states = torch.stack(next_states)
-        rewards = torch.stack(rewards)
-        terminations = torch.tensor(terminations).float().to(device)
+        # Get the current Q-values for the selected actions (from policy network)
+        current_q = policy_dqn(states).gather(1, actions.unsqueeze(1)).squeeze()
 
-        # Compute current Q-values for selected actions
-        current_q = policy_dqn(states).gather(dim=1, index=actions.unsqueeze(dim=1)).squeeze()
+        # Compute the TD target (target Q-value)
+        with torch.no_grad():
+            target_q = rewards + self.discount_factor_g * target_dqn(next_states).max(1)[0] * (1 - terminations)
 
-        # Compute total loss
-        total_loss = self.compute_total_loss(
-            current_q, rewards, next_states, terminations, target_dqn
-        )
+        # Compute the TD error (delta)
+        td_error = target_q - current_q
 
-        # Perform optimization step
+        # Compute the loss (TD loss + noise penalty)
+        loss = self.compute_total_loss(current_q, rewards, next_states, terminations, target_dqn)
+
+        # Zero gradients, perform backpropagation, and update parameters
         self.optimizer.zero_grad()
-        total_loss.backward()
+        loss.backward()
         self.optimizer.step()
 
+        return loss
 
-    def optimize_step(self, total_loss):
-        # Perform optimization step
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        self.optimizer.step()
 
 
     def test(self, render=False):
@@ -353,8 +438,6 @@ class Agent:
 
         # Create the environment with the updated parameters
         env = gym.make(self.env_id, **env_params)
-        
-
 
         # Load the trained model
         policy_dqn = self.network
