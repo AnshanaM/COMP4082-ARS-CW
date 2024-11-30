@@ -14,11 +14,6 @@ from nrowandqn import NROWANDQN
 from experience_replay import ReplayMemory
 import logging
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', handlers=[
-    logging.FileHandler("cartpole-v1.log"),
-    logging.StreamHandler()
-])
 
 def transpose(matrix_list):
     """
@@ -48,9 +43,6 @@ def StatShrink2D(data_list):
     var_list = [np.var(edata) for edata in new_list]
     return mean_list,var_list
 
-def save2D4list(a, b, c, d, dirs):
-    np.savez(dirs, a, b, c, d)
-
 def update_target(current_model, target_model):
     target_model.load_state_dict(current_model.state_dict())
 
@@ -64,6 +56,12 @@ os.makedirs(RUNS_DIR, exist_ok=True)
 LOG_FILE = os.path.join(RUNS_DIR, 'cartpole.log')
 MODEL_FILE = os.path.join(RUNS_DIR, 'cartpole.pt')
 GRAPH_FILE = os.path.join(RUNS_DIR, 'cartpole.png')
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', handlers=[
+    logging.FileHandler(LOG_FILE),
+    logging.StreamHandler()
+])
 
 
 env_id = "CartPole-v1"
@@ -96,15 +94,18 @@ rewards_all = []
 # observe sup(R), inf(R)
 reward_inf = 0
 reward_sup = 100
-k_by_reward = lambda reward_x : ((k_final-k_start)*reward_x+(k_start*reward_sup-reward_inf*k_final))/(reward_sup-reward_inf)
+k_by_reward = lambda reward_x: k_final * (reward_x - reward_inf) / (reward_sup - reward_inf)
 
-for i in range(5):
+
+for i in range(1):
     num_frames = 30000
     batch_size = 32
     gamma      = 0.99
 
     losses = []
     all_rewards = []
+    k_values = []
+    d_values_sigma_losses = []
     episode_reward = 0
     current_model = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
     target_model  = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
@@ -117,60 +118,113 @@ for i in range(5):
     replay_buffer = ReplayMemory(10000)
     update_target(current_model, target_model)
 
+    episode = 0
+    episode_reward = 0
+    for frame_idx in range(1, num_frames + 1):
+        args_k = 0.
 
-    for episode in range(1, 501):  # Tracking episodes
-        episode_reward = 0
-        for frame_idx in range(1, num_frames + 1):
-            args_k = 0.
+        # select action
+        action = current_model.act(state)
 
-            # select action
-            action = current_model.act(state)
+        # execute action
+        next_state, reward, terminated, truncated, info = env.step(action)
+        # store experience in replay buffer
+        replay_buffer.append(state, action, reward, next_state, terminated or truncated)
+    
+        state = next_state
+    
+        # accumulate reward
+        episode_reward += reward
 
-            # execute action
-            next_state, reward, terminated, truncated, info = env.step(action)
-            # store experience in replay buffer
-            replay_buffer.append(state, action, reward, next_state, terminated or truncated)
-        
-            state = next_state
-        
-            # accumulate reward
-            episode_reward += reward
+        # calculate k according to episode_reward, reward_sup and reware_inf
+        args_k = k_by_reward(episode_reward)
+        k_values.append(args_k)
 
-            # calculate k according to episode_reward, reward_sup and reware_inf
-            args_k = k_by_reward(episode_reward)
+        # logging.info(f"Frame {frame_idx}/{num_frames}, Episode {episode}, Current Reward: {reward}")
 
-            # logging.info(f"Frame {frame_idx}/{num_frames}, Episode {episode}, Current Reward: {reward}")
-
-            if terminated or truncated:
-                # Reset environment for the next episode
-                state, info = env.reset()
-                all_rewards.append(episode_reward)
-                logging.info(f"Episode {episode}, Reward: {episode_reward}, k: {args_k}")
-                break
+        if terminated or truncated:
+            episode +=1
+            # Reset environment for the next episode
+            state, info = env.reset()
+            all_rewards.append(episode_reward)
+            logging.info(f"Episode {episode}, Frame {frame_idx}, Episode Reward: {episode_reward}, k: {args_k}")
+            episode_reward = 0
             
-            if len(replay_buffer) > batch_size:
-                # calculate D  using Eq. 8 and calculate TD-error
-                # sample random minibatch, implemented inside improved_td_loss function
-                loss = improved_td_loss(batch_size, replay_buffer, current_model, target_model, gamma, args_k, optimizer)
-                losses.append(loss.item())
-
-                # Log loss and other information
-                logging.info(f"Episode {episode}, Frame {frame_idx}, Loss: {loss.item()}, k: {args_k}, Reward: {reward}, Episode Reward: {episode_reward}")
-
-            # Log every 100 frames or so, adjust as necessary
-            if frame_idx % 100 == 0:
-                logging.info(f"Frame {frame_idx}/{num_frames}, Episode {episode}, Current Reward: {reward}")
-
-            # Update the target model at regular intervals
-            if frame_idx % update_frequency_N == 0:
-                update_target(current_model, target_model)
-                logging.info(f"Updating target model at frame {frame_idx}, Episode {episode}, Reward: {all_rewards[-1]}")
         
+        if len(replay_buffer) > batch_size:
+            # calculate D  using Eq. 8 and calculate TD-error
+            # sample random minibatch, implemented inside improved_td_loss function
+            loss, sigma_loss = improved_td_loss(batch_size, replay_buffer, current_model, target_model, gamma, args_k, optimizer)
+            losses.append(loss.item())
+            d_values_sigma_losses.append(sigma_loss.item())
+
+            # Log loss and other information
+            # logging.info(f"Episode {episode}, Frame {frame_idx}, Loss: {loss.item()}, k: {args_k}")
+
+
+        # Update the target model at regular intervals
+        if frame_idx % update_frequency_N == 0:
+            update_target(current_model, target_model)
+            logging.info(f"Updating target model at frame {frame_idx}, Episode {episode}, Episode Reward: {all_rewards[-1]}")
+    
     losses_all.append(losses)
     rewards_all.append(all_rewards)
+
+def save_graph(mean_rewards, mean_losses, k_values, d_values, graph_file):
+    """
+    Save the graph showing mean rewards, mean losses, k values, and D values over episodes.
+
+    Args:
+    - mean_rewards (list): List of mean rewards per episode.
+    - mean_losses (list): List of mean losses per episode.
+    - k_values (list): List of k values over episodes.
+    - d_values (list): List of D values (sigma losses) over episodes.
+    - graph_file (str): Path to save the graph file.
+    """
+    # Create a new figure
+    plt.figure(figsize=(24, 6))
+
+    # Subplot for mean rewards
+    plt.subplot(1, 4, 1)
+    plt.plot(mean_rewards, label='Mean Rewards', color='blue')
+    plt.xlabel('Episodes')
+    plt.ylabel('Mean Rewards')
+    plt.title('Mean Rewards Over Episodes')
+    plt.legend()
+
+    # Subplot for mean losses
+    plt.subplot(1, 4, 2)
+    plt.plot(mean_losses, label='Mean Losses', color='red')
+    plt.xlabel('Episodes')
+    plt.ylabel('Mean Loss')
+    plt.title('Mean Losses Over Episodes')
+    plt.legend()
+
+    # Subplot for k values
+    plt.subplot(1, 4, 3)
+    plt.plot(k_values, label='k Values', color='green')
+    plt.xlabel('Episodes')
+    plt.ylabel('k Values')
+    plt.title('k Values Over Episodes')
+    plt.legend()
+
+    # Subplot for D values (sigma losses)
+    plt.subplot(1, 4, 4)
+    plt.plot(d_values, label='D Values (Sigma Losses)', color='purple')
+    plt.xlabel('Episodes')
+    plt.ylabel('D Values')
+    plt.title('D Values Over Episodes')
+    plt.legend()
+
+    # Save the plot as a PNG file
+    plt.tight_layout()
+    plt.savefig(graph_file)
+    plt.close()
+    logging.info(f"Graph saved to {graph_file}")
+
 
 logging.info(f"Training completed. Saving model to {MODEL_FILE}")
 torch.save(current_model.state_dict(), MODEL_FILE)
 mean_losses, var_losses = StatShrink2D(losses_all)
 mean_rewards, var_rewards = StatShrink2D(rewards_all)
-save2D4list(mean_losses, var_losses, mean_rewards, var_rewards, "data/CartPole.npz")
+save_graph(mean_rewards, mean_losses, k_values, d_values_sigma_losses , GRAPH_FILE)

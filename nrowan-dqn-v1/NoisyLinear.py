@@ -101,7 +101,7 @@ class NoisyLinear(nn.Module):
         
         return F.linear(x, weight, bias)
     
-
+    # computation of D
     def sigma_loss(self):
         tensorws = torch.abs(self.weight_sigma)
         ws_mean = torch.mean(tensorws)
@@ -117,5 +117,3 @@ class NoisyLinear(nn.Module):
         tb = torch.mean(self.bias_sigma)
         tb = tb.data.cpu().numpy()
         return tw, tb
-
-#adapted from https://github.com/HCodeRunner/noisy-networks-with-deterministic-factor/blob/master/base/noisynetws.py
