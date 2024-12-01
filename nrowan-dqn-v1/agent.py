@@ -102,7 +102,7 @@ reward_sup = 100
 k_by_reward = lambda reward_x: max(0, min(k_final, k_final * (reward_x - reward_inf) / (reward_sup - reward_inf)))
 k_values_timestep = []
 
-for i in range(1):
+for i in range(5):
     num_frames = 30000
     batch_size = 32
     gamma      = 0.99
