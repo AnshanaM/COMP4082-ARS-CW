@@ -58,6 +58,7 @@ class NROWANDQN(nn.Module):
         return self.noisy_fc3.sigma_loss()
 
 if __name__ == '__main__':
+
     state_dim = 4
     action_dim = 2
     env = gym.make("CartPole-v1")
@@ -66,3 +67,10 @@ if __name__ == '__main__':
     output = net(state)
     print(output)
 
+    # state_dim = 2
+    # action_dim = 3
+    # env = gym.make("MountainCar-v0")
+    # net = NROWANDQN(state_dim, action_dim, env)
+    # state = torch.randn(1, state_dim)
+    # output = net(state)
+    # print(output)

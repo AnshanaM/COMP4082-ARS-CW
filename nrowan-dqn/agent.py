@@ -3,7 +3,7 @@ import numpy as np
 import os
 import torch
 import torch.optim as optim
-from tools import improved_td_loss, StatShrink2D, update_target, save_graph, test_model
+from tools import improved_td_loss, StatShrink2D, update_target, save_graph
 from nrowandqn import NROWANDQN
 from experience_replay import ReplayMemory
 import logging
@@ -19,6 +19,10 @@ LOG_FILE = os.path.join(RUNS_DIR, 'cartpole.log')
 MODEL_FILE = os.path.join(RUNS_DIR, 'cartpole.pt')
 GRAPH_FILE = os.path.join(RUNS_DIR, 'cartpole.png')
 
+# LOG_FILE = os.path.join(RUNS_DIR, 'mountaincar.log')
+# MODEL_FILE = os.path.join(RUNS_DIR, 'mountaincar.pt')
+# GRAPH_FILE = os.path.join(RUNS_DIR, 'mountaincar.png')
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', handlers=[
     logging.FileHandler(LOG_FILE),
@@ -27,6 +31,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', hand
 
 
 env_id = "CartPole-v1"
+# env_id = "MountainCar-v0"
 env = gym.make(env_id)
 
 k_start = 0
@@ -37,8 +42,14 @@ num_frames = 30000
 batch_size = 32
 gamma      = 0.99
 N = 10000
+
+# cartpole ------------------------------------------------------------------------
 reward_inf = 0
 reward_sup = 100
+
+# mountaincar ---------------------------------------------------------------------
+# reward_inf = -200
+# reward_sup = 0
 
 # initialise replay memory with capacity N
 replay_buffer = ReplayMemory(N)
@@ -107,6 +118,7 @@ for i in range(5):
         # calculate k according to episode_reward, reward_sup and reware_inf
         args_k = k_by_reward(episode_reward)
         k_values.append(args_k)
+        print(args_k)
 
         if terminated or truncated:
             episode +=1
@@ -124,10 +136,6 @@ for i in range(5):
             loss, sigma_loss = improved_td_loss(episode,frame_idx,batch_size, replay_buffer, current_model, target_model, gamma, args_k, optimizer)
             losses.append(loss.item())
             d_values_sigma_losses.append(sigma_loss.item())
-
-            # Log loss and other information
-            # logging.info(f"Episode {episode}, Frame {frame_idx}, Loss: {loss.item()}, k: {args_k}")
-
 
         # Update the target model at regular intervals
         if frame_idx % update_frequency == 0:
@@ -150,11 +158,10 @@ for t in range(max_timesteps):
     timestep_values = [episode[t] for episode in aligned_k_values if episode[t] is not None]
     mean_k_values_timestep.append(np.mean(timestep_values))
 
+
 logging.info(f"Training completed. Saving model to {MODEL_FILE}")
 torch.save(current_model.state_dict(), MODEL_FILE)
-# mean_losses, var_losses = StatShrink2D(losses_all)
-# mean_rewards, var_rewards = StatShrink2D(rewards_all)
-# save_graph(mean_rewards, mean_losses, mean_k_values_timestep, max_timesteps, d_values_sigma_losses , GRAPH_FILE)
+
 mean_losses, var_losses = StatShrink2D(losses_all)
 mean_rewards, var_rewards = StatShrink2D(rewards_all)
 mean_k_values_timestep, var_k_values_timestep = StatShrink2D(k_values_timestep)
