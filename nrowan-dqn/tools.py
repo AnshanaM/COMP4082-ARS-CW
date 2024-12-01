@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import matplotlib.pyplot as plt
 import math
+from nrowandqn import NROWANDQN
 
 def transpose(matrix_list):
 
@@ -74,60 +75,7 @@ def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_m
 
     return loss, sigmaloss
 
-# def save_graph(mean_rewards, mean_losses, mean_k_values_timestep, max_timesteps, d_values, graph_file):
-#     # Create a new figure
-#     plt.figure(figsize=(24, 6))
-
-#     # Subplot for mean rewards
-#     plt.subplot(1, 4, 1)
-#     plt.plot(mean_rewards, label='Mean Rewards', color='blue')
-#     plt.xlabel('Episodes')
-#     plt.ylabel('Mean Rewards')
-#     plt.title('Mean Rewards Over Episodes')
-#     plt.legend()
-
-#     # Subplot for mean losses
-#     plt.subplot(1, 4, 2)
-#     plt.plot(mean_losses, label='Mean Losses', color='red')
-#     plt.xlabel('Episodes')
-#     plt.ylabel('Mean Loss')
-#     plt.title('Mean Losses Over Episodes')
-#     plt.legend()
-
-#     # Subplot for k values
-#     plt.subplot(1, 4, 3)
-#     timesteps = range(max_timesteps)
-#     plt.plot(timesteps, mean_k_values_timestep, label='Mean k Values', color='green')
-#     plt.xlabel('Timesteps')
-#     plt.ylabel('Mean k Value')
-#     plt.title('Mean k Values Across Timesteps (Averaged over episodes)')
-#     plt.legend()
-
-#     # Subplot for D values (sigma losses)
-#     plt.subplot(1, 4, 4)
-#     plt.plot(d_values, label='D Values (Sigma Losses)', color='purple')
-#     plt.xlabel('Episodes')
-#     plt.ylabel('D Values')
-#     plt.title('D Values Over Episodes')
-#     plt.legend()
-
-#     # Save the plot as a PNG file
-#     plt.tight_layout()
-#     plt.savefig(graph_file)
-#     plt.close()
-#     logging.info(f"Graph saved to {graph_file}")
-
 def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values_timestep, var_k_values_timestep, d_values, var_d_values, graph_file):
-    """
-    Save graphs showing the mean and variance for rewards, losses, k values, and D values.
-
-    Args:
-    - mean_rewards, var_rewards: Mean and variance of rewards per episode.
-    - mean_losses, var_losses: Mean and variance of losses per episode.
-    - mean_k_values_timestep, var_k_values_timestep: Mean and variance of k values per timestep.
-    - d_values, var_d_values: Mean and variance of D values per episode.
-    - graph_file: Path to save the graph file.
-    """
     # Compute standard deviations from variances
     std_rewards = [math.sqrt(v) for v in var_rewards]
     std_losses = [math.sqrt(v) for v in var_losses]
@@ -194,3 +142,40 @@ def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values
     plt.savefig(graph_file)
     plt.close()
     logging.info(f"Graph saved to {graph_file}")
+
+def test_model(env, model_path, render=True, episodes=5):
+    device = "cpu"
+    # Load the model architecture and weights
+    model = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()  # Set model to evaluation mode
+
+    # Test the model
+    rewards = []
+    for episode in range(episodes):
+        state, info = env.reset()
+        episode_reward = 0
+        done = False
+
+        while not done:
+            if render:
+                env.render()
+
+            # Select action using the loaded model
+            state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
+            with torch.no_grad():
+                action = model(state_tensor).argmax(dim=1).item()
+
+            # Take action in the environment
+            next_state, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+
+            episode_reward += reward
+            state = next_state
+
+        rewards.append(episode_reward)
+        print(f"Episode {episode + 1}: Total Reward: {episode_reward}")
+
+    env.close()
+    return rewards
+

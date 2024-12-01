@@ -3,7 +3,7 @@ import numpy as np
 import os
 import torch
 import torch.optim as optim
-from tools import improved_td_loss, StatShrink2D, update_target, save_graph
+from tools import improved_td_loss, StatShrink2D, update_target, save_graph, test_model
 from nrowandqn import NROWANDQN
 from experience_replay import ReplayMemory
 import logging
