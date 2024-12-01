@@ -8,7 +8,7 @@ import numpy as np
 import logging
 
 
-def improved_td_loss(batch_size, buffer, current_model, target_model, gamma, args_k, opt):
+def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_model, gamma, args_k, opt):
     device = "cpu"
     # sample a batch of transitions (state, action, reward, next_state, done)
     transitions = buffer.sample(batch_size)
@@ -42,7 +42,7 @@ def improved_td_loss(batch_size, buffer, current_model, target_model, gamma, arg
     td_loss = (q_value - expected_q_value.detach()).pow(2).mean()
     loss = td_loss + sigmaloss
 
-    logging.info(f"TD Loss: {td_loss:.4f}, Sigma Loss (D): {sigmaloss:.4f}, Total Loss: {loss:.4f} k_value: {args_k:.4f}")
+    logging.info(f"Episode: {episode}, Frame: {frame} TD Loss: {td_loss:.4f}, Sigma Loss (D): {sigmaloss:.4f}, Total Loss: {loss:.4f} k_value: {args_k:.4f}")
 
     # optimize the model, recalculate gradients
     opt.zero_grad()
