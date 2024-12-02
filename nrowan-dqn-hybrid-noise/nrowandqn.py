@@ -55,18 +55,14 @@ class NROWANDQN(nn.Module):
         # Add Gaussian action noise
         # noise = np.random.normal(0, 0.5, size=self.num_actions)
         
-        p_salt=0.05
-        p_pepper=0.05
-        low_value=-1
-        high_value=1
-        noise = np.random.choice([low_value, high_value, 0], size=self.num_actions, p=[p_salt, p_pepper, 1 - p_salt - p_pepper])
-
         # Get Q-values for all actions and add noise
         with torch.no_grad():
             #original NROWAN-DQN
-            # q_value = self.forward(state)  # Get Q-values for all actions
+            q_value = self.forward(state)  # Get Q-values for all actions
+
             # with Gaussian noise
-            q_value = self.forward(state).cpu().data.numpy() + noise  # Get Q-values and add noise
+            # q_value = self.forward(state).cpu().data.numpy() + noise
+
         action = np.argmax(q_value, axis=1).item()  # Select the action with the max Q-value and convert to Python scalar
         return action
     
