@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from NoisyLinear import NoisyLinear
+from .NoisyLinear import NoisyLinear
    
 """
 This NROWAN-DQN will be applied to Cartpole and MountainCar
@@ -16,9 +16,9 @@ All layers user ReLu function as activation function except output layer.
 
 """
 
-class NROWANDQN(nn.Module):
+class ORIGINAL_NROWANDQN(nn.Module):
     def __init__(self, num_inputs, num_actions, env):
-        super(NROWANDQN, self).__init__()
+        super(ORIGINAL_NROWANDQN, self).__init__()
 
         self.env = env
 
@@ -62,15 +62,7 @@ if __name__ == '__main__':
     state_dim = 4
     action_dim = 2
     env = gym.make("CartPole-v1")
-    net = NROWANDQN(state_dim, action_dim, env)
+    net = ORIGINAL_NROWANDQN(state_dim, action_dim, env)
     state = torch.randn(1, state_dim)
     output = net(state)
     print(output)
-
-    # state_dim = 2
-    # action_dim = 3
-    # env = gym.make("MountainCar-v0")
-    # net = NROWANDQN(state_dim, action_dim, env)
-    # state = torch.randn(1, state_dim)
-    # output = net(state)
-    # print(output)

@@ -4,7 +4,7 @@ import os
 import torch
 import torch.optim as optim
 from tools import improved_td_loss, StatShrink2D, update_target, save_graph
-from nrowandqn import NROWANDQN
+from original_nrowandqn import ORIGINAL_NROWANDQN
 from experience_replay import ReplayMemory
 import logging
 
@@ -55,9 +55,9 @@ reward_sup = 100
 replay_buffer = ReplayMemory(N)
 
 # initialise online Q-net
-current_model = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
 # initialise target Q-net
-target_model  = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
 
 optimizer = optim.Adam(current_model.parameters(), lr=learning_rate_a)
     
@@ -85,8 +85,8 @@ for i in range(5):
     k_values = []
     d_values_sigma_losses = []
     episode_reward = 0
-    current_model = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
-    target_model  = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
 
 
     state, info = env.reset()

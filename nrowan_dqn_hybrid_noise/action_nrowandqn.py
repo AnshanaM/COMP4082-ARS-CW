@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from NoisyLinear import NoisyLinear
+from .NoisyLinear import NoisyLinear
 import numpy as np
    
 """
@@ -17,9 +17,9 @@ All layers user ReLu function as activation function except output layer.
 
 """
 
-class NROWANDQN(nn.Module):
+class ACTION_NROWANDQN(nn.Module):
     def __init__(self, num_inputs, num_actions, env):
-        super(NROWANDQN, self).__init__()
+        super(ACTION_NROWANDQN, self).__init__()
 
         self.env = env
         self.num_actions=num_actions
@@ -36,7 +36,6 @@ class NROWANDQN(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.noisy_fc3(x)
         return x
-
 
     # def act(self, state):
     #     if not isinstance(state, torch.Tensor):
@@ -77,7 +76,7 @@ if __name__ == '__main__':
     state_dim = 4
     action_dim = 2
     env = gym.make("CartPole-v1")
-    net = NROWANDQN(state_dim, action_dim, env)
+    net = ACTION_NROWANDQN(state_dim, action_dim, env)
     state = torch.randn(1, state_dim)
     output = net(state)
     print(output)
