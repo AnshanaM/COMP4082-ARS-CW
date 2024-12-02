@@ -36,14 +36,7 @@ class NROWANDQN(nn.Module):
         x = F.relu(self.fc2(x))
         x = self.noisy_fc3(x)
         return x
-    
-    # get action
-    # def act(self, state):
-    #     with torch.no_grad():
-    #         state = torch.FloatTensor(state).unsqueeze(0)
-    #     q_value = self.forward(state)
-    #     action  = q_value.max(1)[1].data[0]
-    #     return action
+
 
     # def act(self, state):
     #     if not isinstance(state, torch.Tensor):
@@ -53,13 +46,26 @@ class NROWANDQN(nn.Module):
     #     action = q_value.argmax(dim=1).item()  # Select the action with the max Q-value and convert to Python scalar
     #     return action
 
+
+    # action noise
     def act(self, state):
         if not isinstance(state, torch.Tensor):
             state = torch.FloatTensor(state).unsqueeze(0).to("cpu")  # Ensure state is a tensor and on the correct device
-        # Add action noise
-        noise = np.random.normal(0, 0.1, size=self.num_actions)
+        
+        # Add Gaussian action noise
+        # noise = np.random.normal(0, 0.5, size=self.num_actions)
+        
+        p_salt=0.05
+        p_pepper=0.05
+        low_value=-1
+        high_value=1
+        noise = np.random.choice([low_value, high_value, 0], size=self.num_actions, p=[p_salt, p_pepper, 1 - p_salt - p_pepper])
+
         # Get Q-values for all actions and add noise
         with torch.no_grad():
+            #original NROWAN-DQN
+            # q_value = self.forward(state)  # Get Q-values for all actions
+            # with Gaussian noise
             q_value = self.forward(state).cpu().data.numpy() + noise  # Get Q-values and add noise
         action = np.argmax(q_value, axis=1).item()  # Select the action with the max Q-value and convert to Python scalar
         return action
@@ -79,11 +85,3 @@ if __name__ == '__main__':
     state = torch.randn(1, state_dim)
     output = net(state)
     print(output)
-
-    # state_dim = 2
-    # action_dim = 3
-    # env = gym.make("MountainCar-v0")
-    # net = NROWANDQN(state_dim, action_dim, env)
-    # state = torch.randn(1, state_dim)
-    # output = net(state)
-    # print(output)

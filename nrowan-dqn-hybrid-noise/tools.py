@@ -76,6 +76,10 @@ def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_m
     return loss, sigmaloss
 
 def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values_timestep, var_k_values_timestep, d_values, var_d_values, graph_file):
+    import math
+    import matplotlib.pyplot as plt
+    import logging
+
     # Compute standard deviations from variances
     std_rewards = [math.sqrt(v) for v in var_rewards]
     std_losses = [math.sqrt(v) for v in var_losses]
@@ -137,8 +141,8 @@ def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values
     plt.title('Mean D Values with Variance')
     plt.legend()
 
-    # Save the plot as a PNG file
-    plt.tight_layout()
+    # Adjust layout for more space and save the plot as a PNG file
+    plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1, wspace=0.3, hspace=0.4)
     plt.savefig(graph_file)
     plt.close()
     logging.info(f"Graph saved to {graph_file}")
