@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from .NoisyLinear import NoisyLinear
+from NoisyLinear import NoisyLinear
    
 """
 This NROWAN-DQN will be applied to Cartpole and MountainCar

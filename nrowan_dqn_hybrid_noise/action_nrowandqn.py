@@ -3,11 +3,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from .NoisyLinear import NoisyLinear
+from NoisyLinear import NoisyLinear
 import numpy as np
    
 """
-This NROWAN-DQN will be applied to Cartpole and MountainCar
+This NROWAN-DQN will be applied to Cartpole.
 No need of convolution layers, state information is directly 
 delivered to fully connected layer.
 Fully connected layer has 2 hidden layers and 1 output layer.
@@ -18,7 +18,7 @@ All layers user ReLu function as activation function except output layer.
 """
 
 class ACTION_NROWANDQN(nn.Module):
-    def __init__(self, num_inputs, num_actions, env):
+    def __init__(self, num_inputs, num_actions, env, initial_noise=0.5, min_noise=0.01, decay_rate=0.995):
         super(ACTION_NROWANDQN, self).__init__()
 
         self.env = env
@@ -30,6 +30,12 @@ class ACTION_NROWANDQN(nn.Module):
         # noisy layer
         self.noisy_fc3 = NoisyLinear(128, env.action_space.n)
 
+
+        # adding noise parameters
+        self.noise_scale = initial_noise
+        self.min_noise = min_noise
+        self.decay_rate = decay_rate
+
     # forward pass
     def forward(self, state):
         x = F.relu(self.fc1(state))
@@ -37,34 +43,49 @@ class ACTION_NROWANDQN(nn.Module):
         x = self.noisy_fc3(x)
         return x
 
-    # def act(self, state):
-    #     if not isinstance(state, torch.Tensor):
-    #         state = torch.FloatTensor(state).unsqueeze(0).to("cpu")  # Ensure state is a tensor and on the correct device
-    #     with torch.no_grad():
-    #         q_value = self.forward(state)  # Get Q-values for all actions
-    #     action = q_value.argmax(dim=1).item()  # Select the action with the max Q-value and convert to Python scalar
-    #     return action
 
 
     # action noise
+    # def act(self, state):
+    #     if not isinstance(state, torch.Tensor):
+    #         state = torch.FloatTensor(state).unsqueeze(0).to("cpu")  # Ensure state is a tensor and on the correct device
+        
+    #     # Add Gaussian action noise
+    #     noise = np.random.normal(0, 0.32, size=self.num_actions)
+        
+    #     # Get Q-values for all actions and add noise
+    #     with torch.no_grad():
+    #         #original NROWAN-DQN
+    #         # q_value = self.forward(state)  # Get Q-values for all actions
+
+    #         # with Gaussian noise
+    #         q_value = self.forward(state).cpu().data.numpy() + noise
+
+    #     action = np.argmax(q_value, axis=1).item()  # Select the action with the max Q-value and convert to Python scalar
+    #     return action
+    
+
     def act(self, state):
         if not isinstance(state, torch.Tensor):
             state = torch.FloatTensor(state).unsqueeze(0).to("cpu")  # Ensure state is a tensor and on the correct device
-        
-        # Add Gaussian action noise
-        # noise = np.random.normal(0, 0.5, size=self.num_actions)
-        
+
+        # Add Gaussian action noise scaled by the noise scale
+        noise = np.random.normal(0, self.noise_scale, size=self.num_actions)
+
         # Get Q-values for all actions and add noise
         with torch.no_grad():
-            #original NROWAN-DQN
-            q_value = self.forward(state)  # Get Q-values for all actions
-
-            # with Gaussian noise
-            # q_value = self.forward(state).cpu().data.numpy() + noise
+            q_value = self.forward(state).cpu().data.numpy() + noise
 
         action = np.argmax(q_value, axis=1).item()  # Select the action with the max Q-value and convert to Python scalar
+
+        # Decay the noise scale
+        self.noise_scale = max(self.min_noise, self.noise_scale * self.decay_rate)
+        print("Noise Scale: ", str(self.noise_scale))
+
         return action
-    
+
+
+
     def reset_noise(self):
         self.noisy_fc3.reset_noise()
 

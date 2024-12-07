@@ -3,7 +3,7 @@ import numpy as np
 import logging
 import matplotlib.pyplot as plt
 import math
-from nrowandqn import NROWANDQN
+from action_nrowandqn import ACTION_NROWANDQN
 
 def transpose(matrix_list):
 
@@ -150,7 +150,7 @@ def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values
 def test_model(env, model_path, render=True, episodes=5):
     device = "cpu"
     # Load the model architecture and weights
-    model = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    model = ACTION_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()  # Set model to evaluation mode
 

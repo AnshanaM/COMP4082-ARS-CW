@@ -3,7 +3,7 @@ import numpy as np
 import logging
 import matplotlib.pyplot as plt
 import math
-from nrowandqn import NROWANDQN
+from original_nrowandqn import ORIGINAL_NROWANDQN
 
 def transpose(matrix_list):
 
@@ -51,7 +51,7 @@ def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_m
     next_q_values = target_model(next_states)
     next_q_value = next_q_values.max(1)[0]
 
-    # calculate expected Q-value using the Bellman equation
+    # calculate expected Q-value
     expected_q_value = rewards + gamma * next_q_value * (1 - terminated)
 
     # calculate noise penalty (sigma loss)
@@ -150,7 +150,7 @@ def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values
 def test_model(env, model_path, render=True, episodes=5):
     device = "cpu"
     # Load the model architecture and weights
-    model = NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()  # Set model to evaluation mode
 
