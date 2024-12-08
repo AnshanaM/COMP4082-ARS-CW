@@ -37,3 +37,20 @@ class ReplayBuffer:
             np.array(next_states, dtype=np.float32),
             np.array(dones, dtype=np.bool_),
         )
+
+    def sample_batch(self, batch_size):
+        """
+        Sample a batch of experiences and the associated masks for all ensemble members.
+        """
+        if len(self.buffer) < batch_size:
+            raise ValueError("Not enough experiences in the buffer to sample a batch.")
+
+        # Randomly sample indices for the batch
+        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+
+        # Gather the mini-batch and masks
+        batch = [self.buffer[i][0] for i in indices]  # Extract experiences
+        masks = [self.buffer[i][1] for i in indices]  # Extract masks
+
+        return batch, masks
+
