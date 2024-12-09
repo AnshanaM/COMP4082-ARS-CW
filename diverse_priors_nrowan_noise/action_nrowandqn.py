@@ -52,7 +52,8 @@ class ACTION_NROWANDQN(nn.Module):
 
         # Get Q-values for all actions and add noise
         with torch.no_grad():
-            q_value = self.forward(state).cpu().data.numpy() + noise
+            # q_value = self.forward(state).cpu().data.numpy() + noise
+            q_value = self.forward(state).cpu().data.numpy()
 
         action = np.argmax(q_value, axis=1).item()  # Select the action with the max Q-value and convert to Python scalar
 

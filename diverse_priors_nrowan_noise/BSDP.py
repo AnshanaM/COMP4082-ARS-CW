@@ -185,7 +185,7 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 from diverse_priors_init import diverse_priors_init
 from experience_replay import ReplayBuffer
-from tools import improved_td_loss
+from tools import improved_td_loss, save_graph, StatShrink2D
 from action_nrowandqn import ACTION_NROWANDQN
 import gymnasium as gym
 
@@ -196,35 +196,6 @@ LOG_FILE = os.path.join(RUNS_DIR, 'cartpole.log')
 MODEL_FILE = os.path.join(RUNS_DIR, 'cartpole.pt')
 GRAPH_FILE = os.path.join(RUNS_DIR, 'cartpole.png')
 
-def save_graph(episode_rewards, d_values, td_errors, k_values):
-    plt.figure(figsize=(12, 8))
-    plt.subplot(2, 2, 1)
-    plt.plot(episode_rewards, label="Episode Rewards")
-    plt.xlabel("Episodes")
-    plt.ylabel("Reward")
-    plt.legend()
-
-    plt.subplot(2, 2, 2)
-    plt.plot(d_values, label="D Values", color="orange")
-    plt.xlabel("Steps")
-    plt.ylabel("D Value")
-    plt.legend()
-
-    plt.subplot(2, 2, 3)
-    plt.plot(td_errors, label="TD Errors", color="red")
-    plt.xlabel("Steps")
-    plt.ylabel("TD Error")
-    plt.legend()
-
-    plt.subplot(2, 2, 4)
-    plt.plot(k_values, label="K Values", color="green")
-    plt.xlabel("Steps")
-    plt.ylabel("K Value")
-    plt.legend()
-
-    plt.tight_layout()
-    plt.savefig(GRAPH_FILE)
-    plt.close()
 
 def train_bsdp(env, num_episodes, capacity, batch_size):
     num_members = 5
@@ -323,7 +294,7 @@ def train_bsdp(env, num_episodes, capacity, batch_size):
                         optimizers[k]              # Optimizer for this Q-function
                     )
 
-                    print(f"Updated Q-function {k + 1}: Loss={loss.item()}, Sigma Loss={sigmaloss.item()}")
+                    # print(f"Updated Q-function {k + 1}: Loss={loss.item()}, Sigma Loss={sigmaloss.item()}")
 
                     # Record metrics
                     td_errors.append(loss.item())
@@ -337,16 +308,43 @@ def train_bsdp(env, num_episodes, capacity, batch_size):
         # Record episode metrics
         episode_rewards.append(total_reward)
         with open(LOG_FILE, 'a') as log_file:
-            log_file.write(f"{episode},{episode_steps},{total_reward},{done},{loss.item()},{args_k}\n")
+            log_file.write(f"Episode: {episode+1},Time steps: {episode_steps},Reward: {total_reward},K final value: {args_k}\n")
+            print(f"Episode: {episode+1},Time steps: {episode_steps},Reward: {total_reward},K final value: {args_k}\n")
 
         # Save model and graph periodically
         if episode % 10 == 0:
             torch.save(ensemble[active_model_idx].state_dict(), MODEL_FILE)
-            save_graph(episode_rewards, d_values, td_errors, k_values)
-
-    save_graph(episode_rewards, d_values, td_errors, k_values)
+            # save_graph(episode_rewards, d_values, td_errors, k_values)
+    
+    # save_graph(episode_rewards, d_values, td_errors, k_values)
     print(f"Training complete. Logs saved to {LOG_FILE}, model to {MODEL_FILE}, graph to {GRAPH_FILE}.")
+    return episode_rewards,d_values, td_errors, k_values
 
-# Example usage
 env = gym.make("CartPole-v1")
-train_bsdp(env, 50, capacity=10000, batch_size=32)
+num_runs = 5
+num_episodes = 500
+all_rewards = []
+all_d_values = []
+all_td_errors = []
+all_k_values = []
+
+# Run the training 5 times
+for run in range(num_runs):
+    print("Run "+ str(run+1))
+    with open(LOG_FILE, 'a') as log_file:
+        log_file.write(f"Run {run}\n")
+    episode_rewards, d_values, td_errors, k_values = train_bsdp(env, num_episodes, capacity=10000, batch_size=32)
+    all_rewards.append(episode_rewards)
+    all_d_values.append(d_values)
+    all_td_errors.append(td_errors)
+    all_k_values.append(k_values)
+
+
+mean_td_errors, var_td_errors = StatShrink2D(all_td_errors)
+mean_rewards, var_rewards = StatShrink2D(all_rewards)
+mean_k_values, var_k_values = StatShrink2D(all_k_values)
+mean_d_values, var_d_values = StatShrink2D(all_d_values)
+
+
+save_graph(mean_rewards, var_rewards, mean_td_errors, var_td_errors, mean_k_values, var_k_values, mean_d_values, var_d_values, GRAPH_FILE)
+
