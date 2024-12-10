@@ -19,9 +19,6 @@ LOG_FILE = os.path.join(RUNS_DIR, 'cartpole.log')
 MODEL_FILE = os.path.join(RUNS_DIR, 'cartpole.pt')
 GRAPH_FILE = os.path.join(RUNS_DIR, 'cartpole.png')
 
-# LOG_FILE = os.path.join(RUNS_DIR, 'mountaincar.log')
-# MODEL_FILE = os.path.join(RUNS_DIR, 'mountaincar.pt')
-# GRAPH_FILE = os.path.join(RUNS_DIR, 'mountaincar.png')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', handlers=[
@@ -30,8 +27,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', hand
 ])
 
 
-env_id = "CartPole-v1"
+# env_id = "CartPole-v1"
 # env_id = "MountainCar-v0"
+env_id = "Pendulum-v1"
 env = gym.make(env_id)
 
 k_start = 0
@@ -51,13 +49,17 @@ reward_sup = 100
 # reward_inf = -200
 # reward_sup = 0
 
+# pendulum
+reward_sup = 0
+reward_inf = -16.2736044
+
 # initialise replay memory with capacity N
 replay_buffer = ReplayMemory(N)
 
 # initialise online Q-net
-current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env).to(device)
 # initialise target Q-net
-target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env).to(device)
 
 optimizer = optim.Adam(current_model.parameters(), lr=learning_rate_a)
     
@@ -85,8 +87,8 @@ for i in range(5):
     k_values = []
     d_values_sigma_losses = []
     episode_reward = 0
-    current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
-    target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env).to(device)
+    target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env).to(device)
 
 
     state, info = env.reset()

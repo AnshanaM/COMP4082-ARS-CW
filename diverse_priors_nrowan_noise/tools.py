@@ -3,6 +3,7 @@ import numpy as np
 import logging
 import matplotlib.pyplot as plt
 import math
+import torch.nn.functional as F
 from action_nrowandqn import ACTION_NROWANDQN
 
 def transpose(matrix_list):
@@ -177,3 +178,101 @@ def test_model(env, model_path, render=True, episodes=5):
     env.close()
     return rewards
 
+def diversity_loss(alpha1,alpha2, model, ensemble, states, epsilon):
+    kl_loss = compute_kl_loss(model, ensemble, states, epsilon)
+    bd_loss = compute_bd_loss(model, states)
+    nl_loss = compute_nl_loss(model, states)
+    return kl_loss + alpha1 * nl_loss + alpha2 * bd_loss
+
+def combined_loss_function(alpha1, alpha2, beta1, beta2, states, actions, rewards, next_states, dones, current_model, target_model, gamma, args_k, opt, ensemble, epsilon):
+    device = "cpu"
+    
+    # Ensure all inputs are on the correct device
+    states = states.to(device)
+    actions = actions.to(device)
+    rewards = rewards.to(device)
+    next_states = next_states.to(device)
+    dones = dones.to(device)
+
+    # Calculate Q-values for current states
+    q_values = current_model(states)
+    q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+
+    # Calculate Q-values for next states
+    with torch.no_grad():
+        next_q_values = target_model(next_states)
+        next_q_value = next_q_values.max(1)[0]
+
+    # Calculate expected Q-value using the Bellman equation
+    expected_q_value = rewards + gamma * next_q_value * (1 - dones)
+
+    # TD-error loss
+    td_loss = (q_value - expected_q_value.detach()).pow(2).mean()
+
+    # Noise penalty (sigma loss)
+    sigmaloss = current_model.get_sigmaloss()
+    sigmaloss = args_k * sigmaloss
+
+    # Diversity loss
+    diversity_loss_value = diversity_loss(alpha1, alpha2, current_model, ensemble, states, epsilon)
+
+    # Combine losses
+    loss = beta1*(td_loss + sigmaloss) + beta2*(diversity_loss_value)
+
+    # Optimize the model and recalculate gradients
+    opt.zero_grad()
+    loss.backward()
+    opt.step()
+
+    # Reset noise layers for exploration
+    current_model.reset_noise()
+    target_model.reset_noise()
+
+    return loss, sigmaloss, diversity_loss_value
+
+def compute_kl_loss(model, ensemble, states, epsilon):
+    # Get Q-values for the current model
+    q_values = model(states)
+    softmax_q = F.softmax(q_values, dim=-1)
+
+    # Get median softmax Q-values for the ensemble
+    ensemble_softmax_q = torch.stack([F.softmax(m(states), dim=-1) for m in ensemble], dim=0)
+    median_softmax_q = torch.median(ensemble_softmax_q, dim=0).values
+
+    # Compute the KL divergence
+    kl_divergence = F.kl_div(softmax_q.log(), median_softmax_q, reduction='batchmean')
+
+    # Clip the KL divergence
+    kl_loss = -torch.clamp(kl_divergence, min=0, max=epsilon)
+    return kl_loss
+
+def compute_nl_loss(model, states, h=1e-2):
+    states = states.requires_grad_(True)
+    # Compute Q-values for all actions
+    q_values = model(states)
+
+    # Compute the second derivatives using finite difference
+    second_derivatives = []
+    for action in range(q_values.size(1)):
+        grads = torch.autograd.grad(q_values[:, action].sum(), states, create_graph=True)[0]
+        second_grads = torch.autograd.grad(grads.sum(), states, create_graph=True)[0]
+        second_derivatives.append(second_grads)
+
+    # Compute the modulus of the second derivatives and square them
+    second_derivatives = torch.stack(second_derivatives, dim=-1)  # Shape: [batch_size, state_dim, num_actions]
+    squared_second_derivatives = torch.norm(second_derivatives, dim=1) ** 2
+
+    # Take the mean over all states and actions
+    nl_loss = -squared_second_derivatives.mean()
+    return nl_loss
+
+def compute_bd_loss(model, states):
+    # Compute Q-values for all actions
+    q_values = model(states)
+
+    # Compute the squared Q-values
+    squared_q_values = q_values ** 2
+
+    # Take the mean over all states and actions
+    bd_loss = squared_q_values.mean()
+    return bd_loss

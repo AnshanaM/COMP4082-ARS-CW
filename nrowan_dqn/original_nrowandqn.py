@@ -26,7 +26,7 @@ class ORIGINAL_NROWANDQN(nn.Module):
         self.fc1 = nn.Linear(num_inputs, 128)
         self.fc2 = nn.Linear(128, 128)
         # noisy layer
-        self.noisy_fc3 = NoisyLinear(128, env.action_space.n)
+        self.noisy_fc3 = NoisyLinear(128, env.action_space.shape[0])
 
     # forward pass
     def forward(self, state):
@@ -58,11 +58,8 @@ class ORIGINAL_NROWANDQN(nn.Module):
         return self.noisy_fc3.sigma_loss()
 
 if __name__ == '__main__':
-
-    state_dim = 4
-    action_dim = 2
-    env = gym.make("CartPole-v1")
-    net = ORIGINAL_NROWANDQN(state_dim, action_dim, env)
-    state = torch.randn(1, state_dim)
+    env = gym.make("Pendulum-v1")
+    net = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env)
+    state = torch.randn(1, env.observation_space.shape[0])
     output = net(state)
     print(output)

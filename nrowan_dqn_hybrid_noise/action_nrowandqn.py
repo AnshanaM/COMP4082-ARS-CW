@@ -1,13 +1,5 @@
-import gymnasium as gym
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-from NoisyLinear import NoisyLinear
-import numpy as np
-   
 """
-This NROWAN-DQN will be applied to Cartpole.
+This NROWAN-DQN will be applied to MountainCar.
 No need of convolution layers, state information is directly 
 delivered to fully connected layer.
 Fully connected layer has 2 hidden layers and 1 output layer.
@@ -16,27 +8,31 @@ Output layer has same number of neurons as number of environment actions.
 All layers user ReLu function as activation function except output layer.
 
 """
+import gymnasium as gym
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from NoisyLinear import NoisyLinear
+import numpy as np
+
 
 class ACTION_NROWANDQN(nn.Module):
     def __init__(self, num_inputs, num_actions, env, initial_noise=0.5, min_noise=0.01, decay_rate=0.995):
         super(ACTION_NROWANDQN, self).__init__()
 
         self.env = env
-        self.num_actions=num_actions
+        self.num_actions = num_actions
 
-        #fully connected layer with 2 hidden layers
+        # Fully connected layers
         self.fc1 = nn.Linear(num_inputs, 128)
         self.fc2 = nn.Linear(128, 128)
-        # noisy layer
         self.noisy_fc3 = NoisyLinear(128, env.action_space.n)
 
-
-        # adding noise parameters
+        # Adding noise parameters
         self.noise_scale = initial_noise
         self.min_noise = min_noise
         self.decay_rate = decay_rate
 
-    # forward pass
     def forward(self, state):
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
@@ -68,11 +64,12 @@ class ACTION_NROWANDQN(nn.Module):
     def get_sigmaloss(self):
         return self.noisy_fc3.sigma_loss()
 
-if __name__ == '__main__':
 
-    state_dim = 4
-    action_dim = 2
-    env = gym.make("CartPole-v1")
+if __name__ == '__main__':
+    env = gym.make("MountainCar-v0")  # MountainCar environment
+    state_dim = env.observation_space.shape[0]  # Dimensions of the observation space
+    action_dim = env.action_space.n  # Number of discrete actions
+
     net = ACTION_NROWANDQN(state_dim, action_dim, env)
     state = torch.randn(1, state_dim)
     output = net(state)

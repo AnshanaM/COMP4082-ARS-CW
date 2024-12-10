@@ -28,52 +28,114 @@ def update_target(current_model, target_model):
     target_model.load_state_dict(current_model.state_dict())
 
 
-def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_model, gamma, args_k, opt):
+# def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_model, gamma, args_k, opt):
+#     device = "cpu"
+#     # sample a batch of transitions (state, action, reward, next_state, done)
+#     transitions = buffer.sample(batch_size)
+
+#     # unpack the batch of transitions into separate lists
+#     states, actions, rewards, next_states, terminated = zip(*transitions)
+
+#     # convert lists to PyTorch tensors and move to the correct device
+#     states = torch.FloatTensor(np.array(states)).to(device)
+#     actions = torch.LongTensor(np.array(actions)).to(device)
+#     rewards = torch.FloatTensor(np.array(rewards)).to(device)
+#     next_states = torch.FloatTensor(np.array(next_states)).to(device)
+#     terminated = torch.FloatTensor(np.array(terminated)).to(device)
+
+#     # calculate Q-values for current states
+#     q_values = current_model(states)
+#     q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
+
+#     # calculate Q-values for next states
+#     next_q_values = target_model(next_states)
+#     next_q_value = next_q_values.max(1)[0]
+
+#     # calculate expected Q-value using the Bellman equation
+#     expected_q_value = rewards + gamma * next_q_value * (1 - terminated)
+
+#     # calculate noise penalty (sigma loss)
+#     sigmaloss = current_model.get_sigmaloss()
+#     sigmaloss = args_k * sigmaloss
+
+#     # compute the total loss
+#     td_loss = (q_value - expected_q_value.detach()).pow(2).mean()
+#     loss = td_loss + sigmaloss
+
+#     logging.info(f"Episode: {episode}, Frame: {frame} TD Loss: {td_loss:.4f}, Sigma Loss (D): {sigmaloss:.4f}, Total Loss: {loss:.4f} k_value: {args_k:.4f}")
+
+#     # optimize the model, recalculate gradients
+#     opt.zero_grad()
+#     loss.backward()
+#     opt.step()
+
+#     # reset noise layers for exploration
+#     current_model.reset_noise()
+#     target_model.reset_noise()
+
+#     return loss, sigmaloss
+
+def improved_td_loss(
+    episode, frame, batch_size, buffer, current_model, target_model, gamma, args_k, opt, weights, indices
+):
     device = "cpu"
-    # sample a batch of transitions (state, action, reward, next_state, done)
+
+    # Sample a batch of transitions (state, action, reward, next_state, done)
     transitions = buffer.sample(batch_size)
 
-    # unpack the batch of transitions into separate lists
-    states, actions, rewards, next_states, terminated = zip(*transitions)
+    # Unpack the batch of transitions into separate lists
+    sampled_experiences, weights, indices = buffer.sample(batch_size)
+    states, actions, rewards, next_states, terminated = zip(*sampled_experiences)
 
-    # convert lists to PyTorch tensors and move to the correct device
+    # Convert lists to PyTorch tensors and move to the correct device
     states = torch.FloatTensor(np.array(states)).to(device)
     actions = torch.LongTensor(np.array(actions)).to(device)
     rewards = torch.FloatTensor(np.array(rewards)).to(device)
     next_states = torch.FloatTensor(np.array(next_states)).to(device)
     terminated = torch.FloatTensor(np.array(terminated)).to(device)
+    weights = torch.FloatTensor(np.array(weights)).to(device)
 
-    # calculate Q-values for current states
+    # Calculate Q-values for current states
     q_values = current_model(states)
     q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
-    # calculate Q-values for next states
+    # Calculate Q-values for next states
     next_q_values = target_model(next_states)
     next_q_value = next_q_values.max(1)[0]
 
-    # calculate expected Q-value using the Bellman equation
+    # Calculate expected Q-value using the Bellman equation
     expected_q_value = rewards + gamma * next_q_value * (1 - terminated)
 
-    # calculate noise penalty (sigma loss)
+    # Calculate TD error for updating priorities
+    td_errors = q_value - expected_q_value.detach()
+
+    # Apply importance-sampling weights to TD loss
+    weighted_td_loss = (weights * td_errors.pow(2)).mean()
+
+    # Calculate noise penalty (sigma loss)
     sigmaloss = current_model.get_sigmaloss()
     sigmaloss = args_k * sigmaloss
 
-    # compute the total loss
-    td_loss = (q_value - expected_q_value.detach()).pow(2).mean()
-    loss = td_loss + sigmaloss
+    # Compute the total loss
+    loss = weighted_td_loss + sigmaloss
 
-    logging.info(f"Episode: {episode}, Frame: {frame} TD Loss: {td_loss:.4f}, Sigma Loss (D): {sigmaloss:.4f}, Total Loss: {loss:.4f} k_value: {args_k:.4f}")
+    logging.info(
+        f"Episode: {episode}, Frame: {frame} Weighted TD Loss: {weighted_td_loss:.4f}, "
+        f"Sigma Loss (D): {sigmaloss:.4f}, Total Loss: {loss:.4f} k_value: {args_k:.4f}"
+    )
 
-    # optimize the model, recalculate gradients
+    # Optimize the model, recalculate gradients
     opt.zero_grad()
     loss.backward()
     opt.step()
 
-    # reset noise layers for exploration
+    # Reset noise layers for exploration
     current_model.reset_noise()
     target_model.reset_noise()
 
-    return loss, sigmaloss
+    buffer.update_priorities(indices, td_errors.detach().cpu().numpy())
+    return td_errors, loss, sigmaloss
+
 
 def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values_timestep, var_k_values_timestep, d_values, var_d_values, graph_file):
     import math
