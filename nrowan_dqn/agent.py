@@ -15,9 +15,9 @@ device = 'cpu'  # force cpu
 RUNS_DIR = 'runs'
 os.makedirs(RUNS_DIR, exist_ok=True)
 
-LOG_FILE = os.path.join(RUNS_DIR, 'cartpole.log')
-MODEL_FILE = os.path.join(RUNS_DIR, 'cartpole.pt')
-GRAPH_FILE = os.path.join(RUNS_DIR, 'cartpole.png')
+LOG_FILE = os.path.join(RUNS_DIR, 'pendulum.log')
+MODEL_FILE = os.path.join(RUNS_DIR, 'pendulum.pt')
+GRAPH_FILE = os.path.join(RUNS_DIR, 'pendulum.png')
 
 
 # Set up logging
@@ -34,7 +34,7 @@ env = gym.make(env_id)
 
 k_start = 0
 k_final = 4
-learning_rate_a = 0.0001
+learning_rate_a = 0.001
 update_frequency = 1000
 num_frames = 30000
 batch_size = 32
@@ -42,8 +42,8 @@ gamma      = 0.99
 N = 10000
 
 # cartpole ------------------------------------------------------------------------
-reward_inf = 0
-reward_sup = 100
+# reward_inf = 0
+# reward_sup = 100
 
 # mountaincar ---------------------------------------------------------------------
 # reward_inf = -200
@@ -70,7 +70,6 @@ rewards_all = []
 k_mean = []
 k_values_timestep = []
 
-
 # original k
 # k_by_reward = lambda reward_x: k_final * (reward_x - reward_inf) / (reward_sup - reward_inf)
 
@@ -78,10 +77,7 @@ k_values_timestep = []
 k_by_reward = lambda reward_x: max(0, min(k_final, k_final * (reward_x - reward_inf) / (reward_sup - reward_inf)))
 
 for i in range(5):
-    num_frames = 30000
-    batch_size = 32
-    gamma      = 0.99
-
+    
     losses = []
     all_rewards = []
     k_values = []
@@ -90,12 +86,11 @@ for i in range(5):
     current_model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env).to(device)
     target_model  = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.shape[0], env).to(device)
 
-
     state, info = env.reset()
 
-    optimizer = optim.Adam(current_model.parameters(), lr=0.0001)
+    optimizer = optim.Adam(current_model.parameters(), lr=learning_rate_a)
 
-    replay_buffer = ReplayMemory(10000)
+    replay_buffer = ReplayMemory(N)
     update_target(current_model, target_model)
 
     episode = 0
@@ -105,7 +100,7 @@ for i in range(5):
         args_k = 0.
 
         # select action
-        action = current_model.act(state)
+        action = current_model.act(env,state)
 
         # execute action
         next_state, reward, terminated, truncated, info = env.step(action)
@@ -117,8 +112,12 @@ for i in range(5):
         # accumulate reward
         episode_reward += reward
 
+        print("Cumulative reward: " + str(episode_reward))
+
         # calculate k according to episode_reward, reward_sup and reware_inf
-        args_k = k_by_reward(episode_reward)
+        normalized_reward = (reward - reward_inf) / (reward_sup - reward_inf)
+        args_k = k_final * max(0, min(1, normalized_reward))
+
         k_values.append(args_k)
         print(args_k)
 
@@ -143,7 +142,7 @@ for i in range(5):
         if frame_idx % update_frequency == 0:
             update_target(current_model, target_model)
             logging.info(f"Updating target model at frame {frame_idx}, Episode {episode}, Episode Reward: {all_rewards[-1]}")
-    
+
     losses_all.append(losses)
     rewards_all.append(all_rewards)
 

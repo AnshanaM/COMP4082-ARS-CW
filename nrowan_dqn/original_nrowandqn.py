@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from NoisyLinear import NoisyLinear
+import numpy as np
    
 """
 This NROWAN-DQN will be applied to Cartpole and MountainCar
@@ -35,21 +36,16 @@ class ORIGINAL_NROWANDQN(nn.Module):
         x = self.noisy_fc3(x)
         return x
     
-    # get action
-    # def act(self, state):
-    #     with torch.no_grad():
-    #         state = torch.FloatTensor(state).unsqueeze(0)
-    #     q_value = self.forward(state)
-    #     action  = q_value.max(1)[1].data[0]
-    #     return action
-
-    def act(self, state):
+    def act(self,env,  state):
         if not isinstance(state, torch.Tensor):
-            state = torch.FloatTensor(state).unsqueeze(0).to("cpu")  # Ensure state is a tensor and on the correct device
+            state = torch.FloatTensor(state).unsqueeze(0).to("cpu")
         with torch.no_grad():
-            q_value = self.forward(state)  # Get Q-values for all actions
-        action = q_value.argmax(dim=1).item()  # Select the action with the max Q-value and convert to Python scalar
-        return action
+            action = self.forward(state).squeeze(0)
+            action = torch.tanh(action)  # Squash to [-1, 1]
+            action = action * torch.FloatTensor(env.action_space.high)  # Scale to action bounds
+            action = action.item()  # Convert to Python scalar       
+        return np.array([action])
+
     
     def reset_noise(self):
         self.noisy_fc3.reset_noise()

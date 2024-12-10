@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import logging
 import matplotlib.pyplot as plt
-import math
+import gymnasium as gym
 from original_nrowandqn import ORIGINAL_NROWANDQN
 
 def transpose(matrix_list):
@@ -45,8 +45,7 @@ def improved_td_loss(episode,frame,  batch_size, buffer, current_model, target_m
 
     # calculate Q-values for current states
     q_values = current_model(states)
-    q_value = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
-
+    q_value = q_values.squeeze(1)
     # calculate Q-values for next states
     next_q_values = target_model(next_states)
     next_q_value = next_q_values.max(1)[0]
@@ -147,17 +146,27 @@ def save_graph(mean_rewards, var_rewards, mean_losses, var_losses, mean_k_values
     plt.close()
     logging.info(f"Graph saved to {graph_file}")
 
-def test_model(env, model_path, render=True, episodes=5):
+def test_model(env_name, model_path, render=True, episodes=15):
     device = "cpu"
+
+    # Create the environment
+    # env = gym.make(env_name)
+    env = gym.make(env_name, render_mode="human" if render else None)
+
+    # Check if the action space is discrete or continuous
+    is_discrete = isinstance(env.action_space, gym.spaces.Discrete)
+
     # Load the model architecture and weights
-    model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], env.action_space.n, env).to(device)
+    model = ORIGINAL_NROWANDQN(env.observation_space.shape[0], 
+                               env.action_space.n if is_discrete else env.action_space.shape[0], 
+                               env).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()  # Set model to evaluation mode
 
     # Test the model
     rewards = []
     for episode in range(episodes):
-        state, info = env.reset()
+        state, _ = env.reset()
         episode_reward = 0
         done = False
 
@@ -168,10 +177,15 @@ def test_model(env, model_path, render=True, episodes=5):
             # Select action using the loaded model
             state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(device)
             with torch.no_grad():
-                action = model(state_tensor).argmax(dim=1).item()
+                if is_discrete:
+                    # For discrete action spaces
+                    action = model(state_tensor).argmax(dim=1).item()
+                else:
+                    # For continuous action spaces
+                    action = model(state_tensor).squeeze(0).cpu().numpy()
 
             # Take action in the environment
-            next_state, reward, terminated, truncated, info = env.step(action)
+            next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
 
             episode_reward += reward
@@ -182,4 +196,3 @@ def test_model(env, model_path, render=True, episodes=5):
 
     env.close()
     return rewards
-
