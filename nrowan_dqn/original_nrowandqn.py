@@ -7,7 +7,7 @@ from NoisyLinear import NoisyLinear
 import numpy as np
    
 """
-This NROWAN-DQN will be applied to Cartpole and MountainCar
+This NROWAN-DQN will be applied to Cartpole and Pendulum.
 No need of convolution layers, state information is directly 
 delivered to fully connected layer.
 Fully connected layer has 2 hidden layers and 1 output layer.

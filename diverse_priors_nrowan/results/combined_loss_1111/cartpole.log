@@ -1,0 +1,9 @@
+Episode,Step,Reward,D Value,TD Error,K Value
+Episode: 1,Time steps: 27,Reward: 27.0,K final value: 0.216
+Episode: 2,Time steps: 10,Reward: 10.0,K final value: 0.08
+Episode: 3,Time steps: 19,Reward: 19.0,K final value: 0.152
+Episode: 4,Time steps: 13,Reward: 13.0,K final value: 0.104
+Episode: 5,Time steps: 13,Reward: 13.0,K final value: 0.104
+Episode: 6,Time steps: 10,Reward: 10.0,K final value: 0.08
+Episode: 7,Time steps: 12,Reward: 12.0,K final value: 0.096
+Episode: 8,Time steps: 17,Reward: 17.0,K final value: 0.136

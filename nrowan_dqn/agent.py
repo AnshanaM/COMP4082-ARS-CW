@@ -28,7 +28,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s', hand
 
 
 # env_id = "CartPole-v1"
-# env_id = "MountainCar-v0"
 env_id = "Pendulum-v1"
 env = gym.make(env_id)
 
